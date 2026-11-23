@@ -1,1 +1,0 @@
-"""Interfaz de escritorio del optimizador CDI."""
