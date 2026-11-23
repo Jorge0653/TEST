@@ -1,0 +1,1 @@
+"""Optimizador de planchas parciales para CDI."""
