@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -8,8 +10,6 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 
 
 class DialogoSugerencias(QDialog):
@@ -40,7 +40,7 @@ class DialogoSugerencias(QDialog):
         layout.addWidget(intro)
 
         columns = QHBoxLayout()
-        self.lista_label = QLabel("Cantidad de grabados")
+        self.lista_label = QLabel("Material y cantidad de grabados")
         self.lista_label.setObjectName("sectionTitle")
         self.archivos_label = QLabel("Grabados incluidos")
         self.archivos_label.setObjectName("sectionTitle")
@@ -63,33 +63,67 @@ class DialogoSugerencias(QDialog):
         columns.addLayout(right_column, 2)
         layout.addLayout(columns, 1)
 
-        options_by_count = {}
+        material_order = {"FP45": 0, "FP67": 1, "FP112": 2, None: 3}
+        options_by_material = {}
         for suggestion in sugerencias:
-            options_by_count.setdefault(suggestion["cantidad"], []).append(suggestion)
+            mat = suggestion.get("material_fotopolimero")
+            options_by_material.setdefault(mat, {}).setdefault(
+                suggestion["cantidad"], []
+            ).append(suggestion)
+
         first_option = None
-        for count, options in sorted(options_by_count.items()):
-            group = QTreeWidgetItem([f"{count} grabados  ·  {len(options)} opciones"])
-            group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            font = QFont(group.font(0))
-            font.setWeight(QFont.Weight.DemiBold)
-            group.setFont(0, font)
-            self.lista.addTopLevelItem(group)
-            for suggestion in options:
-                text = (
-                    f"Opción {suggestion.get('variante', 1)}     ·     "
-                    f"{suggestion['eficiencia']:g}%     ·     "
-                    f"{suggestion['ancho']:g} × {suggestion['alto']:g} mm"
+        for material in sorted(
+            options_by_material,
+            key=lambda m: (material_order.get(m, 4), str(m or "").casefold()),
+        ):
+            counts_map = options_by_material[material]
+            total_mat_options = sum(len(opts) for opts in counts_map.values())
+            material_label = material or "Sin tipo de fotopolímero"
+            material_node = QTreeWidgetItem(
+                [
+                    f"{material_label}   ·   {total_mat_options} "
+                    f"opción{'es' if total_mat_options != 1 else ''}"
+                ]
+            )
+            material_node.setFlags(
+                material_node.flags() & ~Qt.ItemFlag.ItemIsSelectable
+            )
+            mat_font = QFont(material_node.font(0))
+            mat_font.setWeight(QFont.Weight.Bold)
+            material_node.setFont(0, mat_font)
+            material_node.setBackground(0, QBrush(QColor("#e8efea")))
+            material_node.setForeground(0, QBrush(QColor("#1e352c")))
+            self.lista.addTopLevelItem(material_node)
+
+            for count, options in sorted(counts_map.items()):
+                group = QTreeWidgetItem(
+                    [f"{count} grabados  ·  {len(options)} opciones"]
                 )
-                item = QTreeWidgetItem([text])
-                item.setData(0, Qt.ItemDataRole.UserRole, suggestion)
-                group.addChild(item)
-                if first_option is None:
-                    first_option = item
-            group.setExpanded(True)
+                group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                font = QFont(group.font(0))
+                font.setWeight(QFont.Weight.DemiBold)
+                group.setFont(0, font)
+                material_node.addChild(group)
+
+                for suggestion in options:
+                    text = (
+                        f"Opción {suggestion.get('variante', 1)}     ·     "
+                        f"{suggestion['eficiencia']:g}%     ·     "
+                        f"{suggestion['ancho']:g} × {suggestion['alto']:g} mm"
+                    )
+                    item = QTreeWidgetItem([text])
+                    item.setData(0, Qt.ItemDataRole.UserRole, suggestion)
+                    group.addChild(item)
+                    if first_option is None:
+                        first_option = item
+                group.setExpanded(True)
+            material_node.setExpanded(True)
         self.lista.currentItemChanged.connect(self._mostrar_archivos)
 
         buttons = QDialogButtonBox()
-        self.use_button = buttons.addButton("Usar selección", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.use_button = buttons.addButton(
+            "Usar selección", QDialogButtonBox.ButtonRole.AcceptRole
+        )
         self.use_button.setEnabled(first_option is not None)
         buttons.addButton("Cerrar", QDialogButtonBox.ButtonRole.RejectRole)
         self.use_button.clicked.connect(self.accept)

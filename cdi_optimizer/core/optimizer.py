@@ -77,39 +77,43 @@ def _evaluar_perfiles(
         os.cpu_count() or 1,
     )
     results = [None] * len(profile_configs)
+    executor = None
+    cancelled_midway = False
     try:
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            futures = {
-                executor.submit(
-                    _optimizar_perfil_en_proceso, (pieces, profile_config)
-                ): index
-                for index, profile_config in enumerate(profile_configs)
-            }
-            pending = set(futures)
-            completed_count = 0
-            while pending:
-                if _cancelled(cancel_event):
-                    for future in pending:
-                        future.cancel()
-                    return None
-                completed, pending = wait(
-                    pending,
-                    timeout=0.1,
-                    return_when=FIRST_COMPLETED,
-                )
-                for future in completed:
-                    results[futures[future]] = future.result()
-                    completed_count += 1
-                    if progress_callback:
-                        percent = 20 + round(
-                            completed_count / len(profile_configs) * 75
-                        )
-                        progress_callback(
-                            percent,
-                            f"Perfiles completados: {completed_count}/{len(profile_configs)}",
-                        )
+        executor = ProcessPoolExecutor(max_workers=worker_count)
+        futures = {
+            executor.submit(
+                _optimizar_perfil_en_proceso, (pieces, profile_config)
+            ): index
+            for index, profile_config in enumerate(profile_configs)
+        }
+        pending = set(futures)
+        completed_count = 0
+        while pending:
+            if _cancelled(cancel_event):
+                cancelled_midway = True
+                for future in pending:
+                    future.cancel()
+                return None
+            completed, pending = wait(
+                pending,
+                timeout=0.1,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in completed:
+                results[futures[future]] = future.result()
+                completed_count += 1
+                if progress_callback:
+                    percent = 20 + round(
+                        completed_count / len(profile_configs) * 75
+                    )
+                    progress_callback(
+                        percent,
+                        f"Perfiles completados: {completed_count}/{len(profile_configs)}",
+                    )
     except Exception:
         if _cancelled(cancel_event):
+            cancelled_midway = True
             return None
         _LOGGER.exception(
             "No se pudieron evaluar perfiles en paralelo; se reintenta en serie"
@@ -117,6 +121,12 @@ def _evaluar_perfiles(
         return _evaluar_perfiles_secuencialmente(
             pieces, profile_configs, cancel_event, progress_callback
         )
+    finally:
+        if executor is not None:
+            executor.shutdown(
+                wait=not cancelled_midway,
+                cancel_futures=cancelled_midway,
+            )
     return results
 
 

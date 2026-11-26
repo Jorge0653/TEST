@@ -706,32 +706,40 @@ def sugerir_combinaciones_en_retazos(
     normal_width = min(float(base_config.get("tambor_w", 1067)), stock_width)
     normal_height = min(float(base_config.get("tambor_h", 1270)), stock_height)
     base_margin = float(base_config.get("margen", 7))
-    remnant_configs = []
+    remnant_entries = []
     for remnant in retazos:
         width, height = sorted(
             (float(remnant["ancho_mm"]), float(remnant["alto_mm"]))
         )
-        remnant_configs.append(
-            {
-                **base_config,
-                "tambor_w": width,
-                "tambor_h": height,
-                "margen_izquierdo": float(
-                    base_config.get("margen_izquierdo", base_margin)
-                ),
-                "margen_derecho": float(
-                    base_config.get("margen_derecho", base_margin)
-                ),
-                "margen_superior": float(
-                    base_config.get("margen_superior", base_margin)
-                ),
-                "pinza": float(base_config.get("pinza", 25)),
-                "tolerancia": float(base_config.get("tolerancia", 3)),
-                "espaciado": float(base_config.get("espaciado", 3)),
-                "rotacion": bool(base_config.get("rotacion", True)),
-            }
+        m_left = float(base_config.get("margen_izquierdo", base_margin))
+        m_right = float(base_config.get("margen_derecho", base_margin))
+        m_top = float(base_config.get("margen_superior", base_margin))
+        pinza = float(base_config.get("pinza", 25))
+        tol = float(base_config.get("tolerancia", 3))
+        usable_w = max(0.0, width - m_left - m_right - tol)
+        usable_h = max(0.0, height - m_top - pinza - tol)
+        remnant_entries.append(
+            (
+                remnant,
+                {
+                    **base_config,
+                    "tambor_w": width,
+                    "tambor_h": height,
+                    "margen_izquierdo": m_left,
+                    "margen_derecho": m_right,
+                    "margen_superior": m_top,
+                    "pinza": pinza,
+                    "tolerancia": tol,
+                    "espaciado": float(base_config.get("espaciado", 3)),
+                    "rotacion": bool(base_config.get("rotacion", True)),
+                },
+                (width, height),
+                usable_w,
+                usable_h,
+            )
         )
 
+    spacing_mm = float(base_config.get("espaciado", 3))
     unique_candidates = set()
     candidate_count = 0
     remnant_checks = 0
@@ -754,20 +762,60 @@ def sugerir_combinaciones_en_retazos(
                 return
             unique_candidates.add(signature)
             candidate_count += 1
-            for remnant_index, (remnant, remnant_config) in enumerate(
-                zip(retazos, remnant_configs), start=1
-            ):
+
+            # Pre-cálculo O(1) para descartar retazos físicamente imposibles sin invocar MaxRects
+            total_padded_area = 0.0
+            max_piece_short = 0.0
+            max_piece_long = 0.0
+            for piece in chosen:
+                pw = float(piece["width_mm"]) + 2.0 * spacing_mm
+                ph = float(piece["height_mm"]) + 2.0 * spacing_mm
+                total_padded_area += pw * ph
+                short_s, long_s = (pw, ph) if pw <= ph else (ph, pw)
+                if short_s > max_piece_short:
+                    max_piece_short = short_s
+                if long_s > max_piece_long:
+                    max_piece_long = long_s
+
+            geom_cache = {}
+            for remnant_index, (
+                remnant,
+                remnant_config,
+                geom_key,
+                usable_w,
+                usable_h,
+            ) in enumerate(remnant_entries, start=1):
                 if timed_cancel.is_set():
                     return
                 if not _retazo_admite_material(remnant, material):
                     continue
-                board = optimizar_piezas(
-                    chosen,
-                    remnant_config,
-                    incluir_dividida=False,
-                    buscar_ancho=False,
-                    cancel_event=timed_cancel,
-                )["placa_unica"]
+
+                min_usable, max_usable = (
+                    (usable_w, usable_h) if usable_w <= usable_h else (usable_h, usable_w)
+                )
+                if (
+                    usable_w <= 0.0
+                    or usable_h <= 0.0
+                    or max_piece_short > min_usable + 1e-7
+                    or max_piece_long > max_usable + 1e-7
+                    or total_padded_area > (usable_w * usable_h) + 1e-6
+                ):
+                    remnant_checks += 1
+                    continue
+
+                if geom_key in geom_cache:
+                    board = geom_cache[geom_key]
+                else:
+                    board = optimizar_piezas(
+                        chosen,
+                        remnant_config,
+                        incluir_dividida=False,
+                        buscar_ancho=False,
+                        cancel_event=timed_cancel,
+                    )["placa_unica"]
+                    if not timed_cancel.is_set():
+                        geom_cache[geom_key] = board
+
                 remnant_checks += 1
                 if board is not None:
                     result_key = (remnant["id"], resolution, material)
@@ -807,7 +855,7 @@ def sugerir_combinaciones_en_retazos(
                     f"{remnant_index}/{len(retazos)} · "
                     f"propuestas: {len(partial_results)}",
                 )
-
+                
         def report_group_progress(local_percent, message):
             group_fraction = (
                 group_index - 1 + max(0, min(100, local_percent)) / 100

@@ -1,0 +1,191 @@
+{
+  "config": {
+    "margen_izquierdo": 5.0,
+    "margen_derecho": 5.0,
+    "margen_superior": 7.0,
+    "pinza": 20.0,
+    "espaciado": 1.0,
+    "tolerancia": 1.0,
+    "ratio_maximo": 4.0,
+    "tambor_w": 900.0,
+    "tambor_h": 900.0,
+    "rotacion": true,
+    "agrupar_tamanos_cercanos": false,
+    "tolerancia_tamanos_cercanos": 3
+  },
+  "rip_dir": "C:/Users/jorge/Documents/Proyectos/MTRemozar/Optimizador CDI/01-Archivos Por Grabar",
+  "cases": {
+    "sintetico_rejilla_identica_12": {
+      "kind": "optimizar_piezas",
+      "piece_count": 12,
+      "elapsed_ms": 118.73,
+      "placa_unica": {
+        "ancho": 619.0,
+        "alto": 664.0,
+        "area_total": 411016.0,
+        "area_aprovechable": 378000.0,
+        "eficiencia_exacta": 100.0,
+        "grabados": 12,
+        "ratio_fuera_limite": false
+      },
+      "placas_dobles": null,
+      "invariant_errors": []
+    },
+    "sintetico_rotacion_critica_10": {
+      "kind": "optimizar_piezas",
+      "piece_count": 10,
+      "elapsed_ms": 2542.58,
+      "placa_unica": {
+        "ancho": 435.0,
+        "alto": 744.0,
+        "area_total": 323640.0,
+        "area_aprovechable": 298200.0,
+        "eficiencia_exacta": 90.979209,
+        "grabados": 10,
+        "ratio_fuera_limite": false
+      },
+      "placas_dobles": {
+        "ancho": 765.0,
+        "alto": 434.0,
+        "area_total": 332010.0,
+        "area_aprovechable": 0.0,
+        "eficiencia_exacta": 96.052399,
+        "grabados": 10,
+        "ratio_fuera_limite": false
+      },
+      "invariant_errors": []
+    },
+    "sintetico_lote_grande_30": {
+      "kind": "optimizar_piezas",
+      "piece_count": 30,
+      "elapsed_ms": 197.07,
+      "placa_unica": null,
+      "placas_dobles": null,
+      "invariant_errors": []
+    },
+    "sintetico_placas_dobles_grupos": {
+      "kind": "optimizar_piezas",
+      "piece_count": 8,
+      "elapsed_ms": 70.38,
+      "placa_unica": {
+        "ancho": 579.0,
+        "alto": 724.0,
+        "area_total": 419196.0,
+        "area_aprovechable": 386400.0,
+        "eficiencia_exacta": 100.0,
+        "grabados": 8,
+        "ratio_fuera_limite": false
+      },
+      "placas_dobles": {
+        "ancho": 590.0,
+        "alto": 724.0,
+        "area_total": 427160.0,
+        "area_aprovechable": 0.0,
+        "eficiencia_exacta": 100.0,
+        "grabados": 8,
+        "ratio_fuera_limite": false
+      },
+      "invariant_errors": []
+    },
+    "sintetico_sin_rotacion": {
+      "kind": "optimizar_piezas",
+      "piece_count": 6,
+      "elapsed_ms": 48.91,
+      "placa_unica": {
+        "ancho": 392.0,
+        "alto": 614.0,
+        "area_total": 240688.0,
+        "area_aprovechable": 217500.0,
+        "eficiencia_exacta": 89.471264,
+        "grabados": 6,
+        "ratio_fuera_limite": false
+      },
+      "placas_dobles": null,
+      "invariant_errors": []
+    },
+    "real_alternativas_g1_FP67_23pzas": {
+      "kind": "generar_alternativas_archivos",
+      "piece_count": 23,
+      "dpi": [
+        4000.0,
+        4000.0
+      ],
+      "material": "FP67",
+      "elapsed_ms": 6893.59,
+      "alternatives_count": 4,
+      "best_eficiencia_exacta": 94.181579,
+      "best_area_total": 552600.0,
+      "invariant_errors": []
+    },
+    "real_sugerir_combinaciones": {
+      "kind": "sugerir_combinaciones",
+      "total_files": 23,
+      "elapsed_ms": 9469.58,
+      "suggestions_count": 60,
+      "top_efficiency_by_count": {
+        "2": 100.0,
+        "3": 100.0,
+        "4": 100.0,
+        "5": 99.2,
+        "6": 99.7,
+        "7": 98.0,
+        "8": 97.3,
+        "9": 92.5,
+        "10": 95.8,
+        "11": 98.2,
+        "12": 94.5,
+        "13": 96.3,
+        "14": 94.4,
+        "15": 97.6,
+        "16": 94.8,
+        "17": 91.0,
+        "18": 93.4,
+        "19": 95.5,
+        "20": 91.1,
+        "21": 90.6
+      },
+      "invariant_errors": []
+    },
+    "real_sugerir_retazos": {
+      "kind": "sugerir_combinaciones_en_retazos",
+      "total_files": 23,
+      "total_remnants": 33,
+      "elapsed_ms": 3326.84,
+      "tiempo_agotado": false,
+      "proposals_count": 30,
+      "best_per_remnant": {
+        "33": 94.218889,
+        "49": 92.761245,
+        "32": 91.217513,
+        "46": 90.005633,
+        "51": 89.325791,
+        "43": 86.536233,
+        "21": 86.31442,
+        "42": 86.071463,
+        "52": 85.585267,
+        "48": 84.923855,
+        "45": 84.819807,
+        "47": 82.040703,
+        "25": 81.948893,
+        "23": 80.442361,
+        "38": 79.012329,
+        "24": 78.990306,
+        "44": 78.044789,
+        "41": 77.553849,
+        "30": 77.506855,
+        "28": 75.564195,
+        "53": 72.165534,
+        "35": 71.154509,
+        "50": 70.658259,
+        "40": 69.343663,
+        "34": 68.609759,
+        "31": 66.269758,
+        "29": 62.191152,
+        "39": 59.344981,
+        "26": 44.527807,
+        "37": 31.431393
+      },
+      "invariant_errors": []
+    }
+  }
+}

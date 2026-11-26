@@ -124,38 +124,71 @@ def _compact_bottom_left(parts, width, height, spacing):
 
 
 def _split_free_rectangles(free_rectangles, used):
-    split_rectangles = []
-    for free in free_rectangles:
-        if not _intersects(free, used):
-            split_rectangles.append(free)
-            continue
-        free_x, free_y, free_w, free_h = free
-        used_x, used_y, used_w, used_h = used
-        if used_x < free_x + free_w and used_x + used_w > free_x:
-            if used_y > free_y and used_y < free_y + free_h:
-                split_rectangles.append((free_x, free_y, free_w, used_y - free_y))
-            if used_y + used_h < free_y + free_h:
-                split_rectangles.append(
-                    (free_x, used_y + used_h, free_w, free_y + free_h - used_y - used_h)
-                )
-        if used_y < free_y + free_h and used_y + used_h > free_y:
-            if used_x > free_x and used_x < free_x + free_w:
-                split_rectangles.append((free_x, free_y, used_x - free_x, free_h))
-            if used_x + used_w < free_x + free_w:
-                split_rectangles.append(
-                    (used_x + used_w, free_y, free_x + free_w - used_x - used_w, free_h)
-                )
+    used_x, used_y, used_w, used_h = used
+    used_x2 = used_x + used_w
+    used_y2 = used_y + used_h
 
-    pruned = []
-    for index, rectangle in enumerate(split_rectangles):
-        if rectangle[2] <= 0 or rectangle[3] <= 0:
-            continue
-        if any(
-            index != other_index and _contains(other, rectangle)
-            for other_index, other in enumerate(split_rectangles)
+    untouched = []
+    new_splits = []
+
+    for free in free_rectangles:
+        free_x, free_y, free_w, free_h = free
+        free_x2 = free_x + free_w
+        free_y2 = free_y + free_h
+
+        if (
+            free_x >= used_x2
+            or free_x2 <= used_x
+            or free_y >= used_y2
+            or free_y2 <= used_y
         ):
+            untouched.append((free_x, free_y, free_w, free_h, free_x2, free_y2))
             continue
-        pruned.append(rectangle)
+
+        if used_x < free_x2 and used_x2 > free_x:
+            if used_y > free_y and used_y < free_y2:
+                h = used_y - free_y
+                if h > 0:
+                    new_splits.append((free_x, free_y, free_w, h, free_x2, used_y))
+            if used_y2 < free_y2:
+                h = free_y2 - used_y2
+                if h > 0:
+                    new_splits.append((free_x, used_y2, free_w, h, free_x2, free_y2))
+        if used_y < free_y2 and used_y2 > free_y:
+            if used_x > free_x and used_x < free_x2:
+                w = used_x - free_x
+                if w > 0:
+                    new_splits.append((free_x, free_y, w, free_h, used_x, free_y2))
+            if used_x2 < free_x2:
+                w = free_x2 - used_x2
+                if w > 0:
+                    new_splits.append((used_x2, free_y, w, free_h, free_x2, free_y2))
+
+    if not new_splits:
+        return [(r[0], r[1], r[2], r[3]) for r in untouched]
+
+    # Ordenar recortes nuevos por área descendente: cualquier recorte contenido
+    # en otro tendrá área menor o igual y aparecerá después.
+    new_splits.sort(key=lambda r: r[2] * r[3], reverse=True)
+    accepted_new = []
+    for rect in new_splits:
+        rx, ry, _, _, rx2, ry2 = rect
+        contained = False
+        for ox, oy, _, _, ox2, oy2 in untouched:
+            if ox <= rx and oy <= ry and ox2 >= rx2 and oy2 >= ry2:
+                contained = True
+                break
+        if contained:
+            continue
+        for ox, oy, _, _, ox2, oy2 in accepted_new:
+            if ox <= rx and oy <= ry and ox2 >= rx2 and oy2 >= ry2:
+                contained = True
+                break
+        if not contained:
+            accepted_new.append(rect)
+
+    pruned = [(r[0], r[1], r[2], r[3]) for r in untouched]
+    pruned.extend((r[0], r[1], r[2], r[3]) for r in accepted_new)
     return pruned
 
 
@@ -509,24 +542,26 @@ def _best_pack(
     if allow_rotation and any(
         item["width_mm"] != item["height_mm"] for item in items
     ):
-        baseline = _best_pack(
-            items,
-            max_width,
-            max_height,
-            spacing,
-            False,
-            width_search,
-            priority,
-            target_ratio,
-            group_dimensions,
-            cancel_event,
-            max_ratio,
-        )
-        if (
-            baseline
-            and _area_without_spacing(best) > _area_without_spacing(baseline) + 1e-9
-        ):
-            return baseline
+        total_item_area = sum(item["width_mm"] * item["height_mm"] for item in items)
+        if _area_without_spacing(best) > total_item_area + 1e-6:
+            baseline = _best_pack(
+                items,
+                max_width,
+                max_height,
+                spacing,
+                False,
+                width_search,
+                priority,
+                target_ratio,
+                group_dimensions,
+                cancel_event,
+                max_ratio,
+            )
+            if (
+                baseline
+                and _area_without_spacing(best) > _area_without_spacing(baseline) + 1e-9
+            ):
+                return baseline
     return best
 
 
@@ -659,7 +694,8 @@ def _two_plate_pack(items, config, max_width, max_height, cancel_event=None):
         for group in groups:
             if cancel_event and cancel_event.is_set():
                 return None
-            remaining = [item for item in all_items if item not in group]
+            group_ids = {id(item) for item in group}
+            remaining = [item for item in all_items if id(item) not in group_ids]
             score_bins([list(group), remaining])
 
     for ordered in strategies:

@@ -7,6 +7,13 @@ from .metadata import extraer_medidas_xmp
 from .packing import optimizar_piezas
 from .scanner import extraer_material_fotopolimero
 
+_MATERIAL_ORDER = {"FP45": 0, "FP67": 1, "FP112": 2, None: 3}
+
+
+def _material_sort_key(material):
+    return (_MATERIAL_ORDER.get(material, 4), str(material or "").casefold())
+
+
 def _dimension_key(piece):
     return tuple(
         sorted((round(piece["width_mm"], 3), round(piece["height_mm"], 3)))
@@ -347,6 +354,47 @@ def _best_options_for_group(
     return options_by_count
 
 
+def _seleccionar_conteos(counts, limit):
+    limit = min(max(1, int(limit)), len(counts))
+    preferred = [count for count in counts if count <= 10][:limit]
+    remaining = [count for count in counts if count not in preferred]
+    slots = limit - len(preferred)
+    if slots >= len(remaining):
+        return preferred + remaining
+    if slots == 1:
+        return preferred + [remaining[-1]]
+    if slots > 1:
+        indices = [
+            round(index * (len(remaining) - 1) / (slots - 1))
+            for index in range(slots)
+        ]
+        return preferred + [remaining[index] for index in indices]
+    return preferred
+
+
+def _construir_lista_material(options_by_count, limit):
+    counts = sorted(options_by_count)
+    selected_counts = _seleccionar_conteos(counts, limit)
+    suggestions = []
+    for count in sorted(selected_counts):
+        options = options_by_count[count]
+        for variant_index in range(min(3, len(options))):
+            option = dict(options[variant_index])
+            for key in (
+                "_eficiencia_exacta",
+                "_grupos_dimension",
+                "_dimension_group_size",
+                "_dimension_signature",
+                "_layout_signature",
+            ):
+                option.pop(key, None)
+            option["variante"] = variant_index + 1
+            suggestions.append(option)
+            if len(suggestions) >= limit:
+                return suggestions
+    return suggestions
+
+
 def sugerir_combinaciones(
     lista_archivos,
     config=None,
@@ -395,7 +443,7 @@ def sugerir_combinaciones(
             progress_callback(100, "No hay suficientes archivos para sugerir combinaciones")
         return {"sugerencias": [], "errores": errors}
 
-    options_by_count = {}
+    options_by_material = {}
     compatibility_groups = {}
     for piece in pieces:
         compatibility_groups.setdefault(
@@ -403,8 +451,8 @@ def sugerir_combinaciones(
         ).append(piece)
     if progress_callback:
         progress_callback(16, "Agrupando archivos por resolución y material")
-    compatibility_groups_list = list(compatibility_groups.values())
-    for group_index, group in enumerate(compatibility_groups_list):
+    compatibility_groups_list = list(compatibility_groups.items())
+    for group_index, ((_, material), group) in enumerate(compatibility_groups_list):
         if cancel_event and cancel_event.is_set():
             return {"sugerencias": [], "errores": [], "cancelado": True}
 
@@ -425,55 +473,48 @@ def sugerir_combinaciones(
             progress_callback=report_group_progress,
             candidate_limit=_limite_candidatos_sugerencia(len(group)),
         )
+        material_bucket = options_by_material.setdefault(material, {})
         for candidates in options.values():
             for option in candidates:
-                _store_option(options_by_count, option)
+                _store_option(material_bucket, option)
 
-    if not options_by_count:
+    active_materials = sorted(
+        (mat for mat, bucket in options_by_material.items() if bucket),
+        key=_material_sort_key,
+    )
+    if not active_materials:
         errors.append("No se encontraron propuestas dentro del ratio máximo configurado.")
         if progress_callback:
             progress_callback(100, "No se encontraron combinaciones viables")
         return {"sugerencias": [], "errores": errors}
 
-    counts = sorted(options_by_count)
-    limit = min(max(1, int(max_sugerencias)), len(counts))
-    preferred = [count for count in counts if count <= 10][:limit]
-    remaining = [count for count in counts if count not in preferred]
-    slots = limit - len(preferred)
-    if slots >= len(remaining):
-        selected_counts = preferred + remaining
-    elif slots == 1:
-        selected_counts = preferred + [remaining[-1]]
-    elif slots > 1:
-        indices = [
-            round(index * (len(remaining) - 1) / (slots - 1))
-            for index in range(slots)
-        ]
-        selected_counts = preferred + [remaining[index] for index in indices]
-    else:
-        selected_counts = preferred
+    # Distribución equitativa (water-filling) del cupo max_sugerencias entre materiales activos.
+    # Si solo existe un material, recibe el 100% del cupo sin alterar los resultados previos.
+    total_budget = max(1, int(max_sugerencias))
+    full_per_material = {
+        mat: _construir_lista_material(options_by_material[mat], total_budget)
+        for mat in active_materials
+    }
+    quotas = {mat: 0 for mat in active_materials}
+    remaining_budget = total_budget
+    pending = list(active_materials)
+    while remaining_budget > 0 and pending:
+        share = max(1, remaining_budget // len(pending))
+        next_pending = []
+        for mat in pending:
+            if remaining_budget <= 0:
+                break
+            available = len(full_per_material[mat]) - quotas[mat]
+            grant = min(available, share, remaining_budget)
+            quotas[mat] += grant
+            remaining_budget -= grant
+            if quotas[mat] < len(full_per_material[mat]):
+                next_pending.append(mat)
+        pending = next_pending
 
     suggestions = []
-    for count in sorted(selected_counts):
-        for variant_index in range(3):
-            options = options_by_count[count]
-            if variant_index >= len(options):
-                continue
-            option = dict(options[variant_index])
-            for key in (
-                "_eficiencia_exacta",
-                "_grupos_dimension",
-                "_dimension_group_size",
-                "_dimension_signature",
-                "_layout_signature",
-            ):
-                option.pop(key, None)
-            option["variante"] = variant_index + 1
-            suggestions.append(option)
-            if len(suggestions) >= max_sugerencias:
-                if progress_callback:
-                    progress_callback(100, "Sugerencias listas")
-                return {"sugerencias": suggestions, "errores": errors}
+    for mat in active_materials:
+        suggestions.extend(full_per_material[mat][: quotas[mat]])
 
     if progress_callback:
         progress_callback(100, "Sugerencias listas")

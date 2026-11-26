@@ -1,19 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Archivo .spec optimizado para empaquetar Optimizador CDI en un único .exe de Windows.
-Uso:
+Archivo .spec optimizado para empaquetar Optimizador CDI en Windows.
+
+Modos soportados mediante variable de entorno CDI_BUILD_MODE:
+  - onefile (por defecto): genera un único ejecutable dist/OptimizadorCDI-final-v43.exe
+  - onedir               : genera carpeta dist/OptimizadorCDI-final-v43/ (arranque instantáneo)
+
+Uso directo:
     python -m PyInstaller --noconfirm --clean OptimizadorCDI.spec
 """
 
 import os
 
-# Excluimos módulos pesados de PySide6 y librerías científicas/GUI que no usa el proyecto
-# para reducir drásticamente el peso del .exe y acelerar el tiempo de arranque en frío.
+BUILD_MODE = os.environ.get("CDI_BUILD_MODE", "onefile").strip().lower()
+APP_NAME = "OptimizadorCDI-final-v43"
+
+# Excluir módulos de PySide6 y librerías externas/estándar no utilizadas en producción
 EXCLUDED_MODULES = [
-    # Módulos pesados de PySide6 que no se utilizan (solo usamos QtCore, QtGui, QtWidgets)
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebChannel",
+    "PySide6.QtWebSockets",
     "PySide6.QtQml",
     "PySide6.QtQuick",
     "PySide6.QtQuickWidgets",
@@ -41,7 +48,15 @@ EXCLUDED_MODULES = [
     "PySide6.QtPdfWidgets",
     "PySide6.QtOpenGL",
     "PySide6.QtOpenGLWidgets",
-    # Módulos de la librería estándar o terceros innecesarios en producción
+    "PySide6.QtDBus",
+    "PySide6.QtDesigner",
+    "PySide6.QtHelp",
+    "PySide6.QtNfc",
+    "PySide6.QtRemoteObjects",
+    "PySide6.QtScxml",
+    "PySide6.QtStateMachine",
+    "PySide6.QtSpatialAudio",
+    "PySide6.QtTextToSpeech",
     "tkinter",
     "unittest",
     "pydoc",
@@ -67,6 +82,7 @@ a = Analysis(
         "PySide6.QtCore",
         "PySide6.QtGui",
         "PySide6.QtWidgets",
+        "cdi_optimizer.core.dispatcher",
     ],
     hookspath=[],
     hooksconfig={},
@@ -78,33 +94,53 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="OptimizadorCDI-final-v42",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[
-        # Evita comprimir con UPX las DLLs críticas de Qt y Python para no causar
-        # falsos positivos en antivirus ni retrasos al cargar en memoria
-        "vcruntime140.dll",
-        "python*.dll",
-        "Qt6Core.dll",
-        "Qt6Gui.dll",
-        "Qt6Widgets.dll",
-    ],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=["app.ico"],
-    version=version_file,
-)
+if BUILD_MODE == "onedir":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=APP_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=["app.ico"],
+        version=version_file,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name=APP_NAME,
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name=APP_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=["app.ico"],
+        version=version_file,
+    )

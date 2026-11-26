@@ -1,10 +1,12 @@
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
-    QDialog,
     QCheckBox,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,31 +16,39 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QSettings
 
 
 class DialogoConfiguracion(QDialog):
     def __init__(self, settings=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferencias de producción")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(560)
         self.settings = settings or QSettings("MTRemozar", "OptimizadorCDI")
 
         layout = QVBoxLayout(self)
         tabs = QTabWidget(self)
+
         production_page = QWidget(tabs)
         production_page.setObjectName("preferencesPage")
         production_form = QFormLayout(production_page)
         production_form.setSpacing(12)
+
         files_page = QWidget(tabs)
         files_page.setObjectName("preferencesPage")
         files_form = QFormLayout(files_page)
         files_form.setSpacing(12)
+
+        machines_page = QWidget(tabs)
+        machines_page.setObjectName("preferencesPage")
+        machines_layout = QVBoxLayout(machines_page)
+        machines_layout.setSpacing(10)
+
         calculation_page = QWidget(tabs)
         calculation_page.setObjectName("preferencesPage")
         calculation_form = QFormLayout(calculation_page)
         calculation_form.setSpacing(12)
 
+        # --- Pestaña Producción ---
         self.tol_corte = QSpinBox()
         self.tol_corte.setRange(0, 100)
         self.tol_corte.setValue(int(self.settings.value("tol_corte", 3)))
@@ -69,6 +79,18 @@ class DialogoConfiguracion(QDialog):
         drum_layout.addWidget(QLabel("Alto"))
         drum_layout.addWidget(self.tambor_h)
 
+        drum_hint = QLabel(
+            "Límite usado para calcular planchas parciales (independiente del tambor físico de cada máquina)."
+        )
+        drum_hint.setObjectName("mutedText")
+        drum_hint.setWordWrap(True)
+
+        production_form.addRow("Tolerancia de corte", self.tol_corte)
+        production_form.addRow("Ratio máximo alto/ancho", self.ratio_maximo)
+        production_form.addRow("Tamaño máx. placa parcial", drum_layout)
+        production_form.addRow("", drum_hint)
+
+        # --- Pestaña Archivos ---
         self.ruta_rip = QLineEdit(self.settings.value("ruta_rip", ""))
         self.ruta_rip.setReadOnly(True)
         browse = QPushButton("Examinar…")
@@ -76,11 +98,87 @@ class DialogoConfiguracion(QDialog):
         folder_layout = QHBoxLayout()
         folder_layout.addWidget(self.ruta_rip, 1)
         folder_layout.addWidget(browse)
+        files_form.addRow("Carpeta raíz de trabajos RIP", folder_layout)
 
-        production_form.addRow("Tolerancia de corte", self.tol_corte)
-        production_form.addRow("Ratio máximo alto/ancho", self.ratio_maximo)
-        production_form.addRow("Límites del tambor CDI", drum_layout)
-        files_form.addRow("Carpeta de trabajos RIP", folder_layout)
+        root_hint = QLabel(
+            "Carpeta monitoreada donde diseño sube los .len pendientes (ej. carpeta 03). "
+            "Al enviar un acomodo a una máquina, los archivos se moverán desde aquí."
+        )
+        root_hint.setObjectName("mutedText")
+        root_hint.setWordWrap(True)
+        files_form.addRow("", root_hint)
+
+        # --- Pestaña Máquinas ---
+        machines_intro = QLabel(
+            "Configura el nombre, la carpeta de cola y el tamaño máximo físico del tambor "
+            "para cada máquina CDI. Se usará al despachar acomodos."
+        )
+        machines_intro.setObjectName("mutedText")
+        machines_intro.setWordWrap(True)
+        machines_layout.addWidget(machines_intro)
+
+        self._machine_controls = {}
+        for slot in (1, 2):
+            group = QGroupBox(f"Máquina {slot}")
+            form = QFormLayout(group)
+            form.setSpacing(8)
+
+            name_edit = QLineEdit(
+                str(self.settings.value(f"maquina_{slot}_nombre", f"Máquina {slot}"))
+            )
+            name_edit.setPlaceholderText(f"Ej. Máquina {slot}")
+
+            path_edit = QLineEdit(
+                str(self.settings.value(f"maquina_{slot}_ruta", ""))
+            )
+            path_edit.setReadOnly(True)
+            path_edit.setPlaceholderText("Sin carpeta configurada")
+            browse_btn = QPushButton("Examinar…")
+            browse_btn.setObjectName("secondaryButton")
+            browse_btn.clicked.connect(
+                lambda _checked=False, s=slot: self._seleccionar_carpeta_maquina(s)
+            )
+            clear_btn = QPushButton("Limpiar")
+            clear_btn.setObjectName("secondaryButton")
+            clear_btn.clicked.connect(
+                lambda _checked=False, edit=path_edit: edit.clear()
+            )
+            path_row = QHBoxLayout()
+            path_row.addWidget(path_edit, 1)
+            path_row.addWidget(browse_btn)
+            path_row.addWidget(clear_btn)
+
+            spin_w = QSpinBox()
+            spin_w.setRange(100, 5000)
+            spin_w.setValue(int(self.settings.value(f"maquina_{slot}_tambor_w", 1067)))
+            spin_w.setSuffix(" mm")
+
+            spin_h = QSpinBox()
+            spin_h.setRange(100, 5000)
+            spin_h.setValue(int(self.settings.value(f"maquina_{slot}_tambor_h", 1270)))
+            spin_h.setSuffix(" mm")
+
+            m_drum = QHBoxLayout()
+            m_drum.addWidget(QLabel("Ancho"))
+            m_drum.addWidget(spin_w)
+            m_drum.addSpacing(10)
+            m_drum.addWidget(QLabel("Alto"))
+            m_drum.addWidget(spin_h)
+
+            form.addRow("Nombre visible", name_edit)
+            form.addRow("Carpeta destino", path_row)
+            form.addRow("Tambor máximo", m_drum)
+            machines_layout.addWidget(group)
+
+            self._machine_controls[slot] = {
+                "nombre": name_edit,
+                "ruta": path_edit,
+                "tambor_w": spin_w,
+                "tambor_h": spin_h,
+            }
+        machines_layout.addStretch(1)
+
+        # --- Pestaña Cálculos ---
         self.agrupar_tamanos_cercanos = QCheckBox(
             "Probar grabados de tamaño cercano (experimental)"
         )
@@ -110,9 +208,7 @@ class DialogoConfiguracion(QDialog):
         calculation_form.addRow(
             "Diferencia máxima por dimensión", self.tolerancia_tamanos_cercanos
         )
-        self.precalcular_sugerencias = QCheckBox(
-            "Precalcular sugerencias"
-        )
+        self.precalcular_sugerencias = QCheckBox("Precalcular sugerencias")
         self.precalcular_sugerencias.setChecked(
             self.settings.value("precalcular_sugerencias", False, type=bool)
         )
@@ -144,8 +240,10 @@ class DialogoConfiguracion(QDialog):
             "Cantidad de estados de selección que se pueden deshacer o rehacer."
         )
         calculation_form.addRow("Historial de selección", self.historial_seleccion)
+
         tabs.addTab(production_page, "Producción")
         tabs.addTab(files_page, "Archivos")
+        tabs.addTab(machines_page, "Máquinas")
         tabs.addTab(calculation_page, "Cálculos")
         layout.addWidget(tabs, 1)
 
@@ -163,10 +261,21 @@ class DialogoConfiguracion(QDialog):
 
     def seleccionar_carpeta(self):
         folder = QFileDialog.getExistingDirectory(
-            self, "Seleccionar carpeta del RIP", self.ruta_rip.text() or "C:/"
+            self, "Seleccionar carpeta raíz del RIP", self.ruta_rip.text() or "C:/"
         )
         if folder:
             self.ruta_rip.setText(folder)
+
+    def _seleccionar_carpeta_maquina(self, slot):
+        controls = self._machine_controls[slot]
+        start_dir = controls["ruta"].text() or self.ruta_rip.text() or "C:/"
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            f"Seleccionar carpeta destino para {controls['nombre'].text().strip() or f'Máquina {slot}'}",
+            start_dir,
+        )
+        if folder:
+            controls["ruta"].setText(folder)
 
     def guardar_y_cerrar(self):
         self.settings.setValue("tol_corte", self.tol_corte.value())
@@ -174,6 +283,12 @@ class DialogoConfiguracion(QDialog):
         self.settings.setValue("tambor_w", self.tambor_w.value())
         self.settings.setValue("tambor_h", self.tambor_h.value())
         self.settings.setValue("ruta_rip", self.ruta_rip.text())
+        for slot, controls in self._machine_controls.items():
+            name = controls["nombre"].text().strip() or f"Máquina {slot}"
+            self.settings.setValue(f"maquina_{slot}_nombre", name)
+            self.settings.setValue(f"maquina_{slot}_ruta", controls["ruta"].text().strip())
+            self.settings.setValue(f"maquina_{slot}_tambor_w", controls["tambor_w"].value())
+            self.settings.setValue(f"maquina_{slot}_tambor_h", controls["tambor_h"].value())
         self.settings.setValue(
             "agrupar_tamanos_cercanos", self.agrupar_tamanos_cercanos.isChecked()
         )

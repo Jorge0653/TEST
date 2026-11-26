@@ -64,10 +64,30 @@ QPushButton {
 }
 QPushButton:hover { background: #edf3ee; border-color: #91a99a; }
 QPushButton:pressed { background: #e2ebe4; }
-QPushButton:disabled { color: #9ca9a1; background: #eef1ee; }
+QPushButton:disabled { color: #9ca9a1; background: #eef1ee; border-color: #d7dfd9; }
 QPushButton#primaryButton { color: #ffffff; background: #285b49; border: 1px solid #285b49; font-weight: 700; }
 QPushButton#primaryButton:hover { background: #34725d; }
 QPushButton#secondaryButton { background: transparent; }
+
+/* Botones directos de despacho a máquina: cómodos para lectura y diferenciados por tono */
+QPushButton#machineButton1 {
+    color: #ffffff; background: #285b49; border: 1px solid #224d3e;
+    border-radius: 5px; padding: 8px 16px; font-size: 10.5pt; font-weight: 700;
+}
+QPushButton#machineButton1:hover { background: #33725c; border-color: #285b49; }
+QPushButton#machineButton1:pressed { background: #1f4839; }
+QPushButton#machineButton1:disabled { color: #9ca9a1; background: #eef1ee; border-color: #d7dfd9; }
+QPushButton#machineButton1[warning="true"] { border: 2px solid #d77b5c; }
+
+QPushButton#machineButton2 {
+    color: #ffffff; background: #2a5d70; border: 1px solid #224c5c;
+    border-radius: 5px; padding: 8px 16px; font-size: 10.5pt; font-weight: 700;
+}
+QPushButton#machineButton2:hover { background: #35738a; border-color: #2a5d70; }
+QPushButton#machineButton2:pressed { background: #204958; }
+QPushButton#machineButton2:disabled { color: #9ca9a1; background: #eef1ee; border-color: #d7dfd9; }
+QPushButton#machineButton2[warning="true"] { border: 2px solid #d77b5c; }
+
 QFrame#solutionCard {
     background: #ffffff; border: 1px solid #d7dfd9; border-radius: 5px;
 }

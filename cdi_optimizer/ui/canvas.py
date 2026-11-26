@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cdi_optimizer.core.dispatcher import validar_acomodo_para_maquina
 from cdi_optimizer.core.metadata import extraer_medidas_xmp
 
 
@@ -325,6 +326,7 @@ class ResultadoTab(QWidget):
     remnant_mode_changed = Signal(bool)
     remnant_used_requested = Signal()
     remnant_exit_requested = Signal()
+    enviar_maquina_requested = Signal(int)
 
     def __init__(self, titulo, parent=None):
         super().__init__(parent)
@@ -332,6 +334,8 @@ class ResultadoTab(QWidget):
         self._remnant_mode = False
         self._previous_data = None
         self._detalle_default = titulo
+        self._maquinas = []
+        self._dispatch_busy = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 14)
@@ -346,15 +350,32 @@ class ResultadoTab(QWidget):
         layout.addWidget(self.canvas, 1)
 
         footer = QHBoxLayout()
+        footer.setSpacing(8)
         self.detalle = QLabel(titulo)
         self.detalle.setObjectName("mutedText")
         footer.addWidget(self.detalle, 1)
 
         self.btn_resumen = QPushButton("Ver resumen")
         self.btn_resumen.setObjectName("secondaryButton")
+        self.btn_resumen.setMinimumHeight(40)
         self.btn_resumen.clicked.connect(self.resumen_requested.emit)
         self.btn_resumen.setEnabled(False)
         footer.addWidget(self.btn_resumen)
+
+        self._machine_buttons = {}
+        for slot in (1, 2):
+            btn = QPushButton(f"Enviar a Máquina {slot}")
+            btn.setObjectName(f"machineButton{slot}")
+            btn.setProperty("warning", False)
+            btn.setMinimumHeight(40)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setEnabled(False)
+            btn.clicked.connect(
+                lambda _checked=False, s=slot: self.enviar_maquina_requested.emit(s)
+            )
+            footer.addWidget(btn)
+            self._machine_buttons[slot] = btn
+
         layout.addLayout(footer)
 
         self.remnant_toolbar = QWidget(self)
@@ -385,6 +406,60 @@ class ResultadoTab(QWidget):
 
         layout.addWidget(self.remnant_toolbar)
         self.remnant_toolbar.hide()
+
+    def actualizar_maquinas(self, maquinas):
+        self._maquinas = list(maquinas)
+        self._actualizar_botones_maquina()
+
+    def set_dispatch_busy(self, busy):
+        self._dispatch_busy = bool(busy)
+        self._actualizar_botones_maquina()
+
+    def _actualizar_botones_maquina(self):
+        by_slot = {m.slot: m for m in self._maquinas}
+        for slot, btn in self._machine_buttons.items():
+            maquina = by_slot.get(slot)
+            if maquina is None:
+                btn.setText(f"Enviar a Máquina {slot}")
+                btn.setToolTip("Configura esta máquina en Preferencias → Máquinas.")
+                btn.setEnabled(False)
+                self._set_button_warning(btn, False)
+                continue
+
+            warnings = (
+                validar_acomodo_para_maquina(self.datos, maquina)
+                if self.datos
+                else []
+            )
+            has_warning = bool(warnings)
+            prefix = "⚠ " if has_warning else ""
+            btn.setText(f"{prefix}Enviar a {maquina.nombre}")
+
+            if not maquina.configurada:
+                btn.setEnabled(False)
+                btn.setToolTip(
+                    f"{maquina.nombre} no tiene carpeta destino configurada.\n"
+                    "Configúrala en Preferencias → Máquinas."
+                )
+                self._set_button_warning(btn, False)
+            else:
+                btn.setEnabled(bool(self.datos) and not self._dispatch_busy)
+                tooltip = (
+                    f"Mover los .len del acomodo visible a {maquina.nombre}\n"
+                    f"Tambor máximo: {maquina.tambor_w:g} × {maquina.tambor_h:g} mm"
+                )
+                if warnings:
+                    tooltip += "\n\n⚠ " + "\n⚠ ".join(warnings)
+                btn.setToolTip(tooltip)
+                self._set_button_warning(btn, has_warning)
+
+    @staticmethod
+    def _set_button_warning(button, warning):
+        if button.property("warning") != warning:
+            button.setProperty("warning", warning)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
     def actualizar_grafico(self, datos):
         if self._remnant_mode:
@@ -424,6 +499,7 @@ class ResultadoTab(QWidget):
             self.resumen.setText("Sin propuesta calculada")
             self.detalle.setText(self._detalle_default)
             self.btn_resumen.setEnabled(False)
+            self._actualizar_botones_maquina()
             return
         count = len(datos.get("grabados", []))
         plate_count = len(datos.get("placas", [])) or 1
@@ -442,3 +518,4 @@ class ResultadoTab(QWidget):
             f"{datos.get('eficiencia', 0):g}% de aprovechamiento"
         )
         self.btn_resumen.setEnabled(True)
+        self._actualizar_botones_maquina()
