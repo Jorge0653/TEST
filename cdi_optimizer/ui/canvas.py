@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -327,23 +328,42 @@ class ResultadoTab(QWidget):
     remnant_used_requested = Signal()
     remnant_exit_requested = Signal()
     enviar_maquina_requested = Signal(int)
+    dispatched_cleared = Signal()
 
     def __init__(self, titulo, parent=None):
         super().__init__(parent)
         self.datos = None
         self._remnant_mode = False
+        self._dispatched_mode = False
         self._previous_data = None
         self._detalle_default = titulo
         self._maquinas = []
         self._dispatch_busy = False
+        self._manual_selection_count = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 14)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
         self.resumen = QLabel("Sin propuesta")
         self.resumen.setObjectName("resultSummary")
         layout.addWidget(self.resumen)
+
+        self.dispatched_banner = QFrame(self)
+        self.dispatched_banner.setObjectName("dispatchedBanner")
+        banner_layout = QHBoxLayout(self.dispatched_banner)
+        banner_layout.setContentsMargins(12, 6, 8, 6)
+        banner_layout.setSpacing(10)
+        self.dispatched_label = QLabel()
+        self.dispatched_label.setObjectName("dispatchedBannerText")
+        self.dispatched_label.setWordWrap(True)
+        banner_layout.addWidget(self.dispatched_label, 1)
+        self.clear_dispatched_button = QPushButton("Limpiar vista")
+        self.clear_dispatched_button.setObjectName("secondaryButton")
+        self.clear_dispatched_button.clicked.connect(self.limpiar_vista_enviada)
+        banner_layout.addWidget(self.clear_dispatched_button)
+        self.dispatched_banner.hide()
+        layout.addWidget(self.dispatched_banner)
 
         self.canvas = CanvasPrevisualizacion()
         self.canvas.grabado_clicked.connect(self.grabado_clicked.emit)
@@ -407,8 +427,16 @@ class ResultadoTab(QWidget):
         layout.addWidget(self.remnant_toolbar)
         self.remnant_toolbar.hide()
 
+    @property
+    def en_modo_enviado(self):
+        return self._dispatched_mode
+
     def actualizar_maquinas(self, maquinas):
         self._maquinas = list(maquinas)
+        self._actualizar_botones_maquina()
+
+    def actualizar_seleccion_manual(self, count):
+        self._manual_selection_count = max(0, int(count))
         self._actualizar_botones_maquina()
 
     def set_dispatch_busy(self, busy):
@@ -417,6 +445,9 @@ class ResultadoTab(QWidget):
 
     def _actualizar_botones_maquina(self):
         by_slot = {m.slot: m for m in self._maquinas}
+        has_active_layout = bool(self.datos) and not self._dispatched_mode
+        has_manual_selection = not has_active_layout and self._manual_selection_count > 0
+
         for slot, btn in self._machine_buttons.items():
             maquina = by_slot.get(slot)
             if maquina is None:
@@ -426,24 +457,22 @@ class ResultadoTab(QWidget):
                 self._set_button_warning(btn, False)
                 continue
 
-            warnings = (
-                validar_acomodo_para_maquina(self.datos, maquina)
-                if self.datos
-                else []
-            )
-            has_warning = bool(warnings)
-            prefix = "⚠ " if has_warning else ""
-            btn.setText(f"{prefix}Enviar a {maquina.nombre}")
-
             if not maquina.configurada:
+                btn.setText(f"Enviar a {maquina.nombre}")
                 btn.setEnabled(False)
                 btn.setToolTip(
                     f"{maquina.nombre} no tiene carpeta destino configurada.\n"
                     "Configúrala en Preferencias → Máquinas."
                 )
                 self._set_button_warning(btn, False)
-            else:
-                btn.setEnabled(bool(self.datos) and not self._dispatch_busy)
+                continue
+
+            if has_active_layout:
+                warnings = validar_acomodo_para_maquina(self.datos, maquina)
+                has_warning = bool(warnings)
+                prefix = "⚠ " if has_warning else ""
+                btn.setText(f"{prefix}Enviar a {maquina.nombre}")
+                btn.setEnabled(not self._dispatch_busy)
                 tooltip = (
                     f"Mover los .len del acomodo visible a {maquina.nombre}\n"
                     f"Tambor máximo: {maquina.tambor_w:g} × {maquina.tambor_h:g} mm"
@@ -452,6 +481,23 @@ class ResultadoTab(QWidget):
                     tooltip += "\n\n⚠ " + "\n⚠ ".join(warnings)
                 btn.setToolTip(tooltip)
                 self._set_button_warning(btn, has_warning)
+            elif has_manual_selection:
+                count = self._manual_selection_count
+                btn.setText(f"Enviar {count} a {maquina.nombre}")
+                btn.setEnabled(not self._dispatch_busy)
+                btn.setToolTip(
+                    f"Envío manual directo (sin acomodo calculado): "
+                    f"moverá {count} archivo(s) seleccionado(s) en el árbol a {maquina.nombre}.\n"
+                    f"Tambor máximo: {maquina.tambor_w:g} × {maquina.tambor_h:g} mm"
+                )
+                self._set_button_warning(btn, False)
+            else:
+                btn.setText(f"Enviar a {maquina.nombre}")
+                btn.setEnabled(False)
+                btn.setToolTip(
+                    "Calcula un acomodo o selecciona archivos en el árbol para enviar."
+                )
+                self._set_button_warning(btn, False)
 
     @staticmethod
     def _set_button_warning(button, warning):
@@ -461,7 +507,36 @@ class ResultadoTab(QWidget):
             button.style().polish(button)
             button.update()
 
+    def _salir_modo_enviado(self):
+        if self._dispatched_mode:
+            self._dispatched_mode = False
+            self.dispatched_banner.hide()
+
+    def mostrar_enviado(self, datos, nombre_maquina, cantidad_archivos):
+        if self._remnant_mode:
+            self._remnant_mode = False
+            self._previous_data = None
+            self.remnant_toolbar.hide()
+            self.remnant_mode_changed.emit(False)
+        self._dispatched_mode = True
+        self._render_grafico(datos)
+        self.dispatched_label.setText(
+            f"✓ Enviado a {nombre_maquina} ({cantidad_archivos} archivo"
+            f"{'s' if cantidad_archivos != 1 else ''} LEN) · Vista de referencia"
+        )
+        self.dispatched_banner.show()
+        self._actualizar_botones_maquina()
+
+    def limpiar_vista_enviada(self):
+        if not self._dispatched_mode:
+            return
+        self._dispatched_mode = False
+        self.dispatched_banner.hide()
+        self._render_grafico(None)
+        self.dispatched_cleared.emit()
+
     def actualizar_grafico(self, datos):
+        self._salir_modo_enviado()
         if self._remnant_mode:
             self._remnant_mode = False
             self._previous_data = None
@@ -470,6 +545,7 @@ class ResultadoTab(QWidget):
         self._render_grafico(datos)
 
     def mostrar_retazo(self, datos):
+        self._salir_modo_enviado()
         if not self._remnant_mode:
             self._previous_data = self.datos
         self._remnant_mode = True

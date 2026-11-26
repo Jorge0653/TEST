@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -63,6 +64,7 @@ from cdi_optimizer.core.dispatcher import (
     preparar_envio,
     revertir_envio,
     validar_acomodo_para_maquina,
+    validar_archivos_para_maquina,
 )
 from cdi_optimizer.core.remnants import (
     InventarioRetazos,
@@ -122,6 +124,12 @@ def _retazo_suggestions_cache_key(filenames, config, remnants, time_budget):
         inventory,
         round(float(time_budget), 3),
     )
+
+
+def _nombre_tinta_legible(path):
+    """Devuelve el nombre de la tinta sin extensión .len a partir de su ruta."""
+    _, ink_name, _ = _descomponer_nombre_len(path)
+    return Path(ink_name).stem or ink_name
 
 
 class PanelMargenes(QWidget):
@@ -329,7 +337,7 @@ class _DialogoResumen(QDialog):
     def __init__(self, selected_paths, available_paths, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Resumen del cálculo")
-        self.resize(760, 460)
+        self.resize(840, 480)
         self.setStyleSheet(
             "QDialog { background: #f4f7f4; color: #263830; }"
             "QTableWidget { background: #ffffff; alternate-background-color: #f1f5f1;"
@@ -349,10 +357,20 @@ class _DialogoResumen(QDialog):
             key = ("ticket", ticket) if ticket else ("job", job_name)
             row = jobs_by_ticket.setdefault(
                 key,
-                {"ticket": ticket, "names": set(), "selected": 0, "available": 0},
+                {
+                    "ticket": ticket,
+                    "names": set(),
+                    "selected": 0,
+                    "available": 0,
+                    "inks": [],
+                },
             )
             row["names"].add(name)
-            row["selected" if selected else "available"] += 1
+            if selected:
+                row["selected"] += 1
+                row["inks"].append(_nombre_tinta_legible(path))
+            else:
+                row["available"] += 1
         jobs = [row for row in jobs_by_ticket.values() if row["selected"]]
         jobs.sort(
             key=lambda row: (
@@ -368,9 +386,9 @@ class _DialogoResumen(QDialog):
                 f"{len(jobs)} papeletas/trabajos · {total_inks} tintas seleccionadas"
             )
         )
-        self.table = QTableWidget(len(jobs), 3, self)
+        self.table = QTableWidget(len(jobs), 4, self)
         self.table.setHorizontalHeaderLabels(
-            ["Papeleta física", "Trabajo", "Tintas seleccionadas"]
+            ["Papeleta física", "Trabajo", "Tintas incluidas", "Cantidad"]
         )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -382,18 +400,26 @@ class _DialogoResumen(QDialog):
             1, QHeaderView.ResizeMode.Stretch
         )
         self.table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
         )
 
         for row_index, job in enumerate(jobs):
             names = " / ".join(sorted(job["names"], key=str.casefold))
+            inks_text = ", ".join(sorted(job["inks"], key=str.casefold))
             values = (
                 job["ticket"] or "Sin papeleta",
                 names,
+                inks_text,
                 f"{job['selected']} de {job['available'] or job['selected']}",
             )
             for column, value in enumerate(values):
-                self.table.setItem(row_index, column, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column == 2:
+                    item.setToolTip(inks_text)
+                self.table.setItem(row_index, column, item)
         layout.addWidget(self.table, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -423,28 +449,74 @@ class _DialogoConfirmarEnvio(QDialog):
         drum_warnings,
         colisiones,
         parent=None,
+        *,
+        results_stale=False,
     ):
         super().__init__(parent)
-        self.setWindowTitle(f"Enviar acomodo a {maquina.nombre}")
-        self.setMinimumWidth(540)
+        is_manual = layout_data is None
+        self.setWindowTitle(
+            f"Envío manual a {maquina.nombre}"
+            if is_manual
+            else f"Enviar acomodo a {maquina.nombre}"
+        )
+        self.setMinimumWidth(580)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        pw = float(layout_data.get("ancho_acomodo", layout_data.get("ancho", 0)))
-        ph = float(layout_data.get("alto_acomodo", layout_data.get("alto", 0)))
-        plate_count = len(layout_data.get("placas", [])) or 1
+        grouped_inks = {}
+        for ruta in rutas:
+            job_name, _, _ = _descomponer_nombre_len(ruta)
+            grouped_inks.setdefault(job_name, []).append(_nombre_tinta_legible(ruta))
+
+        if is_manual:
+            detail_line = (
+                f"<b>Modo:</b> Envío manual directo (sin acomodo calculado)<br>"
+                f"<b>Archivos:</b> {len(rutas)} archivo(s) LEN "
+                f"({len(grouped_inks)} trabajo{'s' if len(grouped_inks) != 1 else ''})"
+            )
+        else:
+            pw = float(layout_data.get("ancho_acomodo", layout_data.get("ancho", 0)))
+            ph = float(layout_data.get("alto_acomodo", layout_data.get("alto", 0)))
+            plate_count = len(layout_data.get("placas", [])) or 1
+            detail_line = (
+                f"<b>Acomodo:</b> {pw:g} × {ph:g} mm · {len(rutas)} archivo(s) LEN · "
+                f"{plate_count} placa{'s' if plate_count != 1 else ''}"
+            )
 
         summary = QLabel(
             f"<b>Destino:</b> {maquina.nombre}<br>"
             f"<b>Carpeta:</b> {maquina.ruta}<br>"
-            f"<b>Acomodo:</b> {pw:g} × {ph:g} mm · {len(rutas)} archivo(s) LEN · "
-            f"{plate_count} placa{'s' if plate_count != 1 else ''}<br>"
+            f"{detail_line}<br>"
             f"<b>Tambor máximo de {maquina.nombre}:</b> "
             f"{maquina.tambor_w:g} × {maquina.tambor_h:g} mm"
         )
         summary.setWordWrap(True)
         layout.addWidget(summary)
+
+        inks_heading = QLabel("Tintas exactas que se moverán:")
+        inks_heading.setObjectName("sectionTitle")
+        layout.addWidget(inks_heading)
+
+        self.inks_list = QListWidget(self)
+        self.inks_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.inks_list.setMaximumHeight(140)
+        for job_name in sorted(grouped_inks, key=str.casefold):
+            inks = sorted(grouped_inks[job_name], key=str.casefold)
+            self.inks_list.addItem(f"{job_name}  →  {', '.join(inks)}")
+        layout.addWidget(self.inks_list)
+
+        if results_stale and not is_manual:
+            stale_box = QLabel(
+                "⚠ La selección en el árbol cambió después del último cálculo. "
+                "Se moverán únicamente las tintas listadas arriba (las del acomodo mostrado en pantalla)."
+            )
+            stale_box.setWordWrap(True)
+            stale_box.setStyleSheet(
+                "background: #fff6e5; color: #8c5311; border: 1px solid #e5c38b; "
+                "border-radius: 4px; padding: 8px; font-weight: 700;"
+            )
+            layout.addWidget(stale_box)
 
         if drum_warnings:
             warn_box = QLabel("⚠ " + "\n⚠ ".join(drum_warnings))
@@ -488,7 +560,7 @@ class _DialogoConfirmarEnvio(QDialog):
             "Cancelar", QDialogButtonBox.ButtonRole.RejectRole
         )
         self.cancel_btn.setObjectName("secondaryButton")
-        if drum_warnings or colisiones:
+        if drum_warnings or colisiones or (results_stale and not is_manual):
             self.cancel_btn.setDefault(True)
             self.cancel_btn.setFocus()
         else:
@@ -612,6 +684,8 @@ class OptimizadorCDI(QMainWindow):
         self._pending_folder_refresh = False
         self._suppress_folder_watcher = False
         self._ultimo_envio = None
+        self._dispatched_paths_snapshot = []
+        self._dispatched_available_snapshot = []
         self._variant_batch = 0
         self._more_variants_available = False
         self._results_stale = False
@@ -796,6 +870,9 @@ class OptimizadorCDI(QMainWindow):
         self.preview_result.enviar_maquina_requested.connect(
             self._enviar_acomodo_a_maquina
         )
+        self.preview_result.dispatched_cleared.connect(
+            self._on_vista_enviada_limpiada
+        )
         layout.addWidget(self.preview_result, 1)
         return panel
 
@@ -975,7 +1052,7 @@ class OptimizadorCDI(QMainWindow):
 
         self._reiniciar_historial_seleccion()
 
-    def cargar_archivos_reales(self):
+    def cargar_archivos_reales(self, preservar_vista_enviada=False):
         self._cancelar_precalculo_sugerencias()
         self._reiniciar_temporizador_inactividad()
         selected_paths = set(self._obtener_archivos_seleccionados())
@@ -987,7 +1064,10 @@ class OptimizadorCDI(QMainWindow):
             saved_paths = [saved_paths]
         selected_paths.update(saved_paths or [])
         self.alternatives = []
-        self.preview_result.actualizar_grafico(None)
+        if not preservar_vista_enviada:
+            self._dispatched_paths_snapshot = []
+            self._dispatched_available_snapshot = []
+            self.preview_result.actualizar_grafico(None)
         self.options_count.setText("Calcula para ver opciones")
         self._show_empty_options()
         self._updating_tree = True
@@ -996,7 +1076,9 @@ class OptimizadorCDI(QMainWindow):
         self._watch_rip_folder(folder)
         if not folder or not os.path.isdir(folder):
             self.route_label.setText("Carpeta RIP sin configurar")
-            self.statusBar().showMessage("Selecciona la carpeta de salida del RIP en Preferencias.")
+            self.statusBar().showMessage(
+                "Selecciona la carpeta de salida del RIP en Preferencias."
+            )
             self._updating_tree = False
             self._actualizar_resumen_seleccion()
             self._reiniciar_historial_seleccion()
@@ -1047,6 +1129,10 @@ class OptimizadorCDI(QMainWindow):
         self.statusBar().showMessage(
             f"{len(jobs)} trabajos · {ink_count} archivos LEN encontrados"
         )
+
+    def _on_vista_enviada_limpiada(self):
+        self._dispatched_paths_snapshot = []
+        self._dispatched_available_snapshot = []
 
     def _iterar_trabajos(self):
         for material_index in range(self.arbol_trabajos.topLevelItemCount()):
@@ -1313,7 +1399,9 @@ class OptimizadorCDI(QMainWindow):
         if self._worker is not None:
             self._pending_folder_refresh = True
             return
-        self.cargar_archivos_reales()
+        self.cargar_archivos_reales(
+            preservar_vista_enviada=self.preview_result.en_modo_enviado
+        )
 
     def _on_item_changed(self, item, column):
         if self._updating_tree:
@@ -1411,6 +1499,7 @@ class OptimizadorCDI(QMainWindow):
             and self._worker is None
             and not self._remnant_view_active
         )
+        self.preview_result.actualizar_seleccion_manual(count)
         self._actualizar_estado_historial()
 
     def _cambiar_modo_visualizacion_retazo(self, active):
@@ -1555,7 +1644,12 @@ class OptimizadorCDI(QMainWindow):
         if not busy:
             if self._pending_folder_refresh:
                 self._pending_folder_refresh = False
-                QTimer.singleShot(0, self.cargar_archivos_reales)
+                QTimer.singleShot(
+                    0,
+                    lambda: self.cargar_archivos_reales(
+                        preservar_vista_enviada=self.preview_result.en_modo_enviado
+                    ),
+                )
             else:
                 self._actualizar_resumen_seleccion()
             self._actualizar_estado_variantes()
@@ -1935,7 +2029,16 @@ class OptimizadorCDI(QMainWindow):
         self._thread_pool.start(self._worker)
 
     def _mostrar_resumen_calculo(self):
-        if self._remnant_view_active and self._retazo_visualizado is not None:
+        preview = getattr(self, "preview_result", None)
+        dispatched_paths = getattr(self, "_dispatched_paths_snapshot", None)
+        if (
+            preview is not None
+            and getattr(preview, "en_modo_enviado", False)
+            and dispatched_paths
+        ):
+            selected_paths = dispatched_paths
+            available_paths = getattr(self, "_dispatched_available_snapshot", [])
+        elif self._remnant_view_active and self._retazo_visualizado is not None:
             selected_paths = self._retazo_visualizado.get("archivos_asignados") or [
                 part.get("ruta")
                 for part in self._retazo_visualizado.get("grabados", [])
@@ -2243,9 +2346,6 @@ class OptimizadorCDI(QMainWindow):
     def _enviar_acomodo_a_maquina(self, slot):
         if self._worker is not None:
             return
-        layout_data = self.preview_result.datos
-        if not layout_data:
-            return
 
         maquina = next(
             (m for m in self._obtener_maquinas_configuradas() if m.slot == slot),
@@ -2259,21 +2359,38 @@ class OptimizadorCDI(QMainWindow):
             )
             return
 
-        rutas = extraer_rutas_acomodo(layout_data)
-        if not rutas:
-            QMessageBox.warning(
-                self,
-                "Sin archivos para enviar",
-                "El acomodo visible no contiene rutas de archivos LEN válidas.",
-            )
-            return
+        has_active_layout = (
+            self.preview_result.datos is not None
+            and not self.preview_result.en_modo_enviado
+        )
+        if has_active_layout:
+            layout_data = copy.deepcopy(self.preview_result.datos)
+            rutas = extraer_rutas_acomodo(layout_data)
+            if not rutas:
+                QMessageBox.warning(
+                    self,
+                    "Sin archivos para enviar",
+                    "El acomodo visible no contiene rutas de archivos LEN válidas.",
+                )
+                return
+            drum_warnings = validar_acomodo_para_maquina(layout_data, maquina)
+        else:
+            layout_data = None
+            rutas = self._obtener_archivos_seleccionados()
+            if not rutas:
+                return
+            drum_warnings = validar_archivos_para_maquina(rutas, maquina)
 
         preflight = preparar_envio(rutas, maquina.ruta)
         if not preflight["valido"]:
             QMessageBox.warning(self, "No se puede enviar", preflight["error"])
             return
 
-        drum_warnings = validar_acomodo_para_maquina(layout_data, maquina)
+        is_stale = (
+            bool(self._results_stale)
+            and has_active_layout
+            and not self._remnant_view_active
+        )
         dialog = _DialogoConfirmarEnvio(
             maquina,
             layout_data,
@@ -2281,11 +2398,13 @@ class OptimizadorCDI(QMainWindow):
             drum_warnings,
             preflight["colisiones"],
             self,
+            results_stale=is_stale,
         )
         if not dialog.exec():
             return
 
-        was_remnant_view = self._remnant_view_active
+        available_before_dispatch = self._obtener_archivos_disponibles()
+        was_remnant_view = self._remnant_view_active and layout_data is not None
         remnant_snapshot = self._retazo_visualizado
 
         self._cancelar_precalculo_sugerencias()
@@ -2321,10 +2440,25 @@ class OptimizadorCDI(QMainWindow):
             if answer == QMessageBox.StandardButton.Yes:
                 self._marcar_retazo_visualizado_usado()
 
-        self.cargar_archivos_reales()
-        self.statusBar().showMessage(
-            f"Enviados {dispatch_result['cantidad']} archivo(s) LEN a {maquina.nombre}"
-        )
+        if layout_data is not None:
+            self._dispatched_paths_snapshot = list(rutas)
+            self._dispatched_available_snapshot = list(available_before_dispatch)
+            self.preview_result.mostrar_enviado(
+                layout_data, maquina.nombre, dispatch_result["cantidad"]
+            )
+            self.cargar_archivos_reales(preservar_vista_enviada=True)
+            self.statusBar().showMessage(
+                f"Enviados {dispatch_result['cantidad']} archivo(s) LEN a {maquina.nombre} "
+                "· acomodo conservado como referencia"
+            )
+        else:
+            self.cargar_archivos_reales(
+                preservar_vista_enviada=self.preview_result.en_modo_enviado
+            )
+            self.statusBar().showMessage(
+                f"Envío manual: {dispatch_result['cantidad']} archivo(s) LEN "
+                f"movidos a {maquina.nombre}"
+            )
 
     def _deshacer_ultimo_envio(self):
         if self._worker is not None or self._ultimo_envio is None:
@@ -2353,7 +2487,7 @@ class OptimizadorCDI(QMainWindow):
 
         self._ultimo_envio = None
         self._undo_dispatch_action.setEnabled(False)
-        self.cargar_archivos_reales()
+        self.cargar_archivos_reales(preservar_vista_enviada=False)
         self.statusBar().showMessage(
             f"Se devolvieron {count} archivo(s) LEN a la carpeta raíz"
         )

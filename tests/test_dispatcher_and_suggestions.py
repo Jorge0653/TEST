@@ -10,6 +10,7 @@ from cdi_optimizer.core.dispatcher import (
     preparar_envio,
     revertir_envio,
     validar_acomodo_para_maquina,
+    validar_archivos_para_maquina,
 )
 
 
@@ -91,6 +92,18 @@ class DispatcherTests(unittest.TestCase):
             "grabados": [],
         }
         self.assertEqual(validar_acomodo_para_maquina(remnant_layout, small_machine), [])
+
+    def test_validates_individual_files_for_manual_dispatch(self):
+        small_machine = MaquinaDestino(1, "CDI Chica", "/tmp", 533, 889)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fits = _escribir_len_prueba(root / "10001-OK_FP67_C.len", 500, 800)
+            too_big = _escribir_len_prueba(root / "10002-BIG_FP67_K.len", 600, 950)
+
+            self.assertEqual(validar_archivos_para_maquina([fits], small_machine), [])
+            warnings = validar_archivos_para_maquina([fits, too_big], small_machine)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("10002-BIG_FP67_K.len", warnings[0])
 
     def test_extracts_deduplicated_paths_from_layout(self):
         layout = {

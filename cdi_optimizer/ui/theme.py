@@ -7,6 +7,10 @@ QLabel#sectionTitle { color: #263830; font-size: 11pt; font-weight: 700; }
 QLabel#mutedText { color: #75847c; }
 QLabel#resultSummary { color: #263830; font-size: 11pt; font-weight: 700; padding: 4px 2px; }
 QLabel#selectionCount { color: #638174; font-size: 9pt; }
+QFrame#dispatchedBanner {
+    background: #e3f1e8; border: 1px solid #9ec4ae; border-radius: 5px;
+}
+QLabel#dispatchedBannerText { color: #1e4d3a; font-weight: 700; }
 QLineEdit, QSpinBox, QDoubleSpinBox {
     background: #ffffff; border: 1px solid #cbd5ce; border-radius: 4px;
     padding: 7px 8px; selection-background-color: #3d7665;

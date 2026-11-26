@@ -10,6 +10,8 @@ import shutil
 import tempfile
 from typing import Any
 
+from .metadata import extraer_medidas_xmp
+
 
 @dataclass(frozen=True)
 class MaquinaDestino:
@@ -82,6 +84,29 @@ def validar_acomodo_para_maquina(
                 f"de {maquina.nombre} ({max_w:g} × {max_h:g} mm)."
             )
 
+    return warnings
+
+
+def validar_archivos_para_maquina(
+    rutas_origen: list[str],
+    maquina: MaquinaDestino,
+) -> list[str]:
+    """Valida en envío manual si algún archivo LEN individual excede el tambor de la máquina."""
+    warnings: list[str] = []
+    drum_short, drum_long = sorted((float(maquina.tambor_w), float(maquina.tambor_h)))
+
+    for ruta in rutas_origen:
+        meta = extraer_medidas_xmp(ruta)
+        if not meta:
+            continue
+        pw = float(meta["ancho_mm"])
+        ph = float(meta["alto_mm"])
+        piece_short, piece_long = sorted((pw, ph))
+        if piece_short > drum_short + 1e-6 or piece_long > drum_long + 1e-6:
+            warnings.append(
+                f"'{Path(ruta).name}' ({pw:g} × {ph:g} mm) excede el tambor máximo "
+                f"de {maquina.nombre} ({maquina.tambor_w:g} × {maquina.tambor_h:g} mm)."
+            )
     return warnings
 
 
